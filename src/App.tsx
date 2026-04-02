@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './style.css';
 import { invoke } from '@tauri-apps/api/tauri';
+import { appWindow } from '@tauri-apps/api/window';
 import * as echarts from 'echarts';
 
 interface Metric {
@@ -127,6 +128,8 @@ function App() {
   const [autostart, setAutostart] = useState(false);
   const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>('auto');
   const [showFrame, setShowFrame] = useState(true);
+  const [ballSize, setBallSize] = useState(48);
+  const [ballOpacity, setBallOpacity] = useState(0.05);
 
   // Fetch realtime data (with mock fallback)
   useEffect(() => {
@@ -327,6 +330,8 @@ function App() {
     if (saved) setTheme(saved);
     invoke<boolean>('get_autostart').then(setAutostart).catch(() => {});
     invoke<boolean>('get_show_frame').then(setShowFrame).catch(() => {});
+    invoke<number>('get_ball_size').then(setBallSize).catch(() => {});
+    invoke<number>('get_ball_opacity').then(setBallOpacity).catch(() => {});
   }, []);
 
   const fetchMarks = () => {
@@ -343,8 +348,11 @@ function App() {
   // 区分点击和拖动：快速点击(<200ms)=展开，长按=拖动
   const mouseDownTime = useRef<number>(0);
 
-  const handleBallMouseDown = () => {
+  const handleBallMouseDown = (e: React.MouseEvent) => {
     mouseDownTime.current = Date.now();
+    if (e.button === 0) {
+      appWindow.startDragging();
+    }
   };
 
   const handleBallMouseUp = async () => {
@@ -437,21 +445,25 @@ function App() {
     const waveBack = cpuVal > 80 ? 'rgba(255,69,58,0.35)' : cpuVal > 50 ? 'rgba(255,159,10,0.3)' : 'rgba(48,209,88,0.3)';
     const borderColor = cpuVal > 80 ? 'rgba(255,69,58,0.5)' : cpuVal > 50 ? 'rgba(255,159,10,0.4)' : 'rgba(48,209,88,0.35)';
 
+    const fontSize = Math.max(12, ballSize * 0.33);
+    const unitSize = Math.max(7, ballSize * 0.16);
+
     return (
       <div
         className="floating-ball"
+        style={{ width: ballSize, height: ballSize, borderRadius: ballSize / 2 }}
         onMouseDown={handleBallMouseDown}
         onMouseUp={handleBallMouseUp}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <svg className="water-svg" viewBox="0 0 64 64">
+        <svg className="water-svg" viewBox="0 0 64 64" style={{ width: ballSize, height: ballSize }}>
           <defs>
             <clipPath id="ball-clip">
               <circle cx="32" cy="32" r="30" />
             </clipPath>
           </defs>
           <g clipPath="url(#ball-clip)">
-            <circle cx="32" cy="32" r="30" className="water-bg" />
+            <circle cx="32" cy="32" r="30" className="water-bg" style={{ fill: `rgba(0,0,0,${ballOpacity})` }} />
             <g style={{ transform: `translateY(${waterLevel - 32}px)` }} className="water-level">
               <path className="wave wave-back" style={{ fill: waveBack }}
                 d="M-48,32 C-40,28 -32,36 -24,32 C-16,28 -8,36 0,32 C8,28 16,36 24,32 C32,28 40,36 48,32 C56,28 64,36 72,32 C80,28 88,36 96,32 C104,28 112,36 120,32 L120,96 L-48,96 Z"
@@ -465,10 +477,10 @@ function App() {
         </svg>
 
         <div className="ball-content">
-          <div className="ball-number" style={{ color: getCpuColor(cpuVal) }}>
+          <div className="ball-number" style={{ color: getCpuColor(cpuVal), fontSize }}>
             {metric ? Math.round(cpuVal) : '--'}
           </div>
-          <div className="ball-unit">%</div>
+          <div className="ball-unit" style={{ fontSize: unitSize }}>%</div>
         </div>
       </div>
     );
@@ -980,6 +992,50 @@ function App() {
                     <option value="light">浅色</option>
                     <option value="dark">深色</option>
                   </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-group">
+              <div className="settings-group-title">悬浮球</div>
+              <div className="settings-card">
+                <div className="setting-row">
+                  <div className="setting-label">
+                    <span>球体大小</span>
+                    <span className="setting-hint">{ballSize}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="32"
+                    max="64"
+                    step="2"
+                    value={ballSize}
+                    className="setting-slider"
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setBallSize(val);
+                      invoke('set_ball_size', { size: val });
+                    }}
+                  />
+                </div>
+                <div className="setting-row">
+                  <div className="setting-label">
+                    <span>背景透明度</span>
+                    <span className="setting-hint">{Math.round(ballOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={Math.round(ballOpacity * 100)}
+                    className="setting-slider"
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value) / 100;
+                      setBallOpacity(val);
+                      invoke('set_ball_opacity', { opacity: val });
+                    }}
+                  />
                 </div>
               </div>
             </div>

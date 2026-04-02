@@ -251,7 +251,37 @@ fn get_settings() -> serde_json::Value {
         "retentionDays": 30,
         "processInterval": 30,
         "showFrame": prefs.get("showFrame").and_then(|v| v.as_bool()).unwrap_or(true),
+        "ballSize": prefs.get("ballSize").and_then(|v| v.as_f64()).unwrap_or(48.0),
+        "ballOpacity": prefs.get("ballOpacity").and_then(|v| v.as_f64()).unwrap_or(0.05),
     })
+}
+
+#[tauri::command]
+fn set_ball_size(size: f64) {
+    let size = size.clamp(32.0, 64.0);
+    let mut prefs = read_prefs();
+    prefs["ballSize"] = serde_json::json!(size);
+    write_prefs(&prefs);
+}
+
+#[tauri::command]
+fn get_ball_size() -> f64 {
+    let prefs = read_prefs();
+    prefs.get("ballSize").and_then(|v| v.as_f64()).unwrap_or(48.0)
+}
+
+#[tauri::command]
+fn set_ball_opacity(opacity: f64) {
+    let opacity = opacity.clamp(0.0, 1.0);
+    let mut prefs = read_prefs();
+    prefs["ballOpacity"] = serde_json::json!(opacity);
+    write_prefs(&prefs);
+}
+
+#[tauri::command]
+fn get_ball_opacity() -> f64 {
+    let prefs = read_prefs();
+    prefs.get("ballOpacity").and_then(|v| v.as_f64()).unwrap_or(0.05)
 }
 
 #[tauri::command]
@@ -395,18 +425,19 @@ fn collapse_window(window: Window) {
         let _ = window.set_position(tauri::PhysicalPosition::new(bp.0, bp.1));
     }
 
-    // 使用 Logical 尺寸，确保在 Retina 屏幕上也是 64x64 CSS 像素
+    // 使用偏好中的球尺寸
+    let ball_sz = get_ball_size();
     let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize {
-        width: 64.0,
-        height: 64.0,
+        width: ball_sz,
+        height: ball_sz,
     })));
     let _ = window.set_max_size(Some(tauri::Size::Logical(tauri::LogicalSize {
-        width: 64.0,
-        height: 64.0,
+        width: ball_sz,
+        height: ball_sz,
     })));
     let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-        width: 64.0,
-        height: 64.0,
+        width: ball_sz,
+        height: ball_sz,
     }));
 
     // 移除阴影和边框
@@ -654,7 +685,7 @@ async fn main() {
             if let Some(monitor) = window.current_monitor().ok().flatten() {
                 let screen_size = monitor.size();
                 let scale = monitor.scale_factor();
-                let ball_size = 64.0 * scale;
+                let ball_size = get_ball_size() * scale;
                 let x = screen_size.width as f64 - ball_size - 20.0 * scale;
                 let y = screen_size.height as f64 / 2.0 - ball_size / 2.0;
                 let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
@@ -715,6 +746,10 @@ async fn main() {
             get_process_ranking,
             set_show_frame,
             get_show_frame,
+            set_ball_size,
+            get_ball_size,
+            set_ball_opacity,
+            get_ball_opacity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

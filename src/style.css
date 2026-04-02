@@ -61,9 +61,9 @@ body {
 
 /* Floating Ball - Water Wave */
 .floating-ball {
-  width: 64px;
-  height: 64px;
-  border-radius: 32px;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
   background: transparent;
   cursor: pointer;
   display: flex;
@@ -79,8 +79,10 @@ body {
   -webkit-appearance: none !important;
 }
 
+.floating-ball,
 .floating-ball * {
   -webkit-app-region: no-drag;
+  cursor: pointer !important;
 }
 
 .floating-ball {
@@ -91,8 +93,8 @@ body {
 /* SVG 水球容器 */
 .water-svg {
   position: absolute;
-  width: 64px;
-  height: 64px;
+  width: 48px;
+  height: 48px;
   pointer-events: none;
 }
 
@@ -161,7 +163,7 @@ body {
 }
 
 .ball-number {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: #ffffff;
@@ -169,7 +171,7 @@ body {
 }
 
 .ball-unit {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 1px;
@@ -971,6 +973,35 @@ body {
   font-size: 13px;
   color: var(--text-secondary);
   min-width: 16px;
+}
+
+.setting-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.setting-slider {
+  width: 120px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border-color);
+  border-radius: 2px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.setting-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 /* Toggle switch */

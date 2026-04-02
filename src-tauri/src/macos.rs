@@ -19,12 +19,9 @@ pub fn remove_window_shadow(window: &Window) {
 }
 
 #[cfg(target_os = "macos")]
-pub fn make_window_draggable(window: &Window) {
-    unsafe {
-        let ns_window = window.ns_window().unwrap() as id;
-        // 允许窗口拖动
-        let _: () = msg_send![ns_window, setMovableByWindowBackground: YES];
-    }
+pub fn make_window_draggable(_window: &Window) {
+    // 拖动由前端 appWindow.startDragging() 处理，不再使用 setMovableByWindowBackground
+    // 避免原生拖拽覆盖 CSS cursor: pointer
 }
 
 #[cfg(target_os = "macos")]
