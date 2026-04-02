@@ -76,12 +76,18 @@ function App() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [metric, setMetric] = useState<Metric | null>(null);
 
-  // 原生关闭按钮回调：收回悬浮球
+  // 原生回调：收回悬浮球 / 展开窗口
   useEffect(() => {
     (window as any).__collapseFromNative = () => {
       setIsExpanded(false);
     };
-    return () => { delete (window as any).__collapseFromNative; };
+    (window as any).__expandFromNative = () => {
+      setIsExpanded(true);
+    };
+    return () => {
+      delete (window as any).__collapseFromNative;
+      delete (window as any).__expandFromNative;
+    };
   }, []);
 
   // Tabs
@@ -399,18 +405,25 @@ function App() {
       });
   };
 
+  const [exportMsg, setExportMsg] = useState('');
+
   const exportCSV = () => {
+    setExportMsg('正在导出...');
     const end = new Date();
     const start = new Date();
-    start.setDate(end.getDate() - 1);
+    start.setDate(end.getDate() - 7);
 
+    console.log('export_csv called', { start: start.toISOString(), end: end.toISOString() });
     invoke<string>('export_csv', {
       start: start.toISOString(),
       end: end.toISOString(),
     }).then((filepath) => {
-      alert(`已导出到: ${filepath}`);
+      setExportMsg(`已导出到: ${filepath}`);
+      setTimeout(() => setExportMsg(''), 5000);
     }).catch((err) => {
-      alert(`导出失败: ${err}`);
+      console.error('export_csv error:', err);
+      setExportMsg(`导出失败: ${err}`);
+      setTimeout(() => setExportMsg(''), 5000);
     });
   };
 
@@ -550,6 +563,7 @@ function App() {
               <button className="action-btn" onClick={() => setActiveTab('history')}>查看历史</button>
               <button className="action-btn" onClick={exportCSV}>导出数据</button>
             </div>
+            {exportMsg && <p className="export-msg">{exportMsg}</p>}
           </div>
         )}
 
@@ -575,6 +589,7 @@ function App() {
               </div>
               <button className="action-btn" onClick={exportCSV}>导出CSV</button>
             </div>
+            {exportMsg && <p className="export-msg">{exportMsg}</p>}
             <div ref={chartRef} className="chart-container" />
           </div>
         )}

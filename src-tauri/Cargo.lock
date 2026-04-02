@@ -11,6 +11,7 @@ dependencies = [
  "dirs",
  "objc",
  "objc_id",
+ "once_cell",
  "serde",
  "serde_json",
  "sqlx",

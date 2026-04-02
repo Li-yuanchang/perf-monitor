@@ -49,11 +49,12 @@ pub fn show_title_bar(window: &Window) {
         // 设置窗口背景色为系统默认
         let bg_color: id = msg_send![class!(NSColor), windowBackgroundColor];
         let _: () = msg_send![ns_window, setBackgroundColor: bg_color];
-        // 设置空标题
+        // 隐藏标题文字和文档图标
+        // NSWindowTitleHidden = 1
+        let _: () = msg_send![ns_window, setTitleVisibility: 1i64];
+        let _: () = msg_send![ns_window, setRepresentedURL: nil];
         let title = NSString::alloc(nil).init_str("");
         let _: () = msg_send![ns_window, setTitle: title];
-        // 隐藏文档图标（避免显示 exec 图标）
-        let _: () = msg_send![ns_window, setRepresentedURL: nil];
     }
 }
 
@@ -87,13 +88,45 @@ pub fn hide_dock_icon() {
     }
 }
 
-/// 显示 Dock 图标（设为 regular app）
+/// 显示 Dock 图标（设为 regular app），并恢复应用图标
 #[cfg(target_os = "macos")]
 pub fn show_dock_icon() {
     unsafe {
         let app: id = msg_send![class!(NSApplication), sharedApplication];
         // NSApplicationActivationPolicyRegular = 0
         let _: () = msg_send![app, setActivationPolicy: 0i64];
+
+        // 通过可执行文件路径找到 icons 目录，加载应用图标
+        if let Ok(exe) = std::env::current_exe() {
+            // dev 模式: exe 在 target/debug/ 下，icons 在 src-tauri/icons/
+            // release 模式: exe 在 .app/Contents/MacOS/ 下
+            let candidates: Vec<std::path::PathBuf> = vec![
+                // dev 模式路径
+                exe.parent().unwrap_or(std::path::Path::new("."))
+                    .join("../../icons/icon.icns"),
+                exe.parent().unwrap_or(std::path::Path::new("."))
+                    .join("../../icons/128x128@2x.png"),
+                // release 模式路径
+                exe.parent().unwrap_or(std::path::Path::new("."))
+                    .join("../Resources/icon.icns"),
+            ];
+            for path in &candidates {
+                if let Ok(canonical) = path.canonicalize() {
+                    let path_str = canonical.to_string_lossy().to_string();
+                    let ns_path = NSString::alloc(nil).init_str(&path_str);
+                    let image: id = msg_send![class!(NSImage), alloc];
+                    let image: id = msg_send![image, initByReferencingFile: ns_path];
+                    if image != nil {
+                        let is_valid: bool = msg_send![image, isValid];
+                        if is_valid {
+                            let _: () = msg_send![app, setApplicationIconImage: image];
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // 激活应用到前台
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
     }

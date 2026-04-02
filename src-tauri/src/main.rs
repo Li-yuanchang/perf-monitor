@@ -20,6 +20,15 @@ struct AppState {
     store: Arc<Mutex<Store>>,
 }
 
+use std::sync::Mutex as StdMutex;
+use once_cell::sync::Lazy;
+
+// 保存小球位置，展开/收起时恢复
+static BALL_POSITION: Lazy<StdMutex<(i32, i32)>> = Lazy::new(|| StdMutex::new((0, 0)));
+
+// 是否显示悬浮球
+static SHOW_BALL: Lazy<StdMutex<bool>> = Lazy::new(|| StdMutex::new(true));
+
 use store::TimeMark;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -310,6 +319,19 @@ r#"<?xml version="1.0" encoding="UTF-8"?>
 // Window control commands
 #[tauri::command]
 fn expand_window(window: Window) {
+    // 仅在悬浮球模式下保存小球位置（窗口可见且是小球状态时才有意义）
+    let is_ball_visible = SHOW_BALL.lock().map(|sb| *sb).unwrap_or(true);
+    if is_ball_visible {
+        if let Ok(pos) = window.outer_position() {
+            if let Ok(mut bp) = BALL_POSITION.lock() {
+                *bp = (pos.x, pos.y);
+            }
+        }
+    }
+
+    // 先隐藏窗口，避免展开过程中看到系统框架闪烁
+    let _ = window.hide();
+
     // 关闭背景拖动，恢复正常点击事件
     disable_window_draggable(&window);
 
@@ -325,7 +347,6 @@ fn expand_window(window: Window) {
     if show_frame {
         show_title_bar(&window);
     } else {
-        // 无框架模式：保持透明无边框，但加阴影
         hide_title_bar(&window);
     }
     let _ = window.set_skip_taskbar(false);
@@ -339,36 +360,28 @@ fn expand_window(window: Window) {
         height: win_h,
     }));
 
-    // 获取小球位置和屏幕尺寸，确保展开窗口完全可见
-    let pos = window.outer_position().unwrap_or(tauri::PhysicalPosition { x: 100, y: 100 });
+    // 窗口居中显示
     if let Ok(monitor) = window.current_monitor() {
         if let Some(m) = monitor {
             let scale = m.scale_factor();
             let screen_w = m.size().width as f64 / scale;
             let screen_h = m.size().height as f64 / scale;
-            let ball_x = pos.x as f64 / scale;
-            let ball_y = pos.y as f64 / scale;
-
-            // 如果窗口右边超出屏幕，向左推
-            let x = if ball_x + win_w > screen_w {
-                (screen_w - win_w - 10.0).max(0.0)
-            } else {
-                ball_x
-            };
-            // 如果窗口下边超出屏幕，向上推
-            let y = if ball_y + win_h > screen_h {
-                (screen_h - win_h - 10.0).max(0.0)
-            } else {
-                ball_y
-            };
-
+            let x = (screen_w - win_w) / 2.0;
+            let y = (screen_h - win_h) / 2.0;
             let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
         }
     }
+
+    // 通知前端切换到展开模式，一切就绪后再显示
+    let _ = window.eval("window.__expandFromNative && window.__expandFromNative()");
+    let _ = window.show();
 }
 
 #[tauri::command]
 fn collapse_window(window: Window) {
+    // 先隐藏窗口，避免收起过程中短暂闪现
+    let _ = window.hide();
+
     // 收起时隐藏 Dock 图标
     hide_dock_icon();
 
@@ -376,6 +389,11 @@ fn collapse_window(window: Window) {
     hide_title_bar(&window);
     let _ = window.set_skip_taskbar(true);
     let _ = window.set_always_on_top(true);
+
+    // 恢复小球到之前的位置（在缩放前设置，避免闪烁）
+    if let Ok(bp) = BALL_POSITION.lock() {
+        let _ = window.set_position(tauri::PhysicalPosition::new(bp.0, bp.1));
+    }
 
     // 使用 Logical 尺寸，确保在 Retina 屏幕上也是 64x64 CSS 像素
     let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize {
@@ -386,7 +404,6 @@ fn collapse_window(window: Window) {
         width: 64.0,
         height: 64.0,
     })));
-
     let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
         width: 64.0,
         height: 64.0,
@@ -396,6 +413,14 @@ fn collapse_window(window: Window) {
     remove_window_shadow(&window);
     // 启用拖动
     make_window_draggable(&window);
+    // 通知前端切回悬浮球
+    let _ = window.eval("window.__collapseFromNative && window.__collapseFromNative()");
+
+    // 只有悬浮球开启时才显示
+    let show = SHOW_BALL.lock().map(|sb| *sb).unwrap_or(true);
+    if show {
+        let _ = window.show();
+    }
 }
 
 fn calculate_stats(metrics: Vec<Metric>, start: DateTime<Utc>, end: DateTime<Utc>) -> TimeWindowStats {
@@ -539,9 +564,24 @@ async fn main() {
         }
     });
 
+    // 读取悬浮球显示偏好
+    let show_ball_pref = {
+        let prefs = read_prefs();
+        prefs.get("showBall").and_then(|v| v.as_bool()).unwrap_or(true)
+    };
+    if let Ok(mut sb) = SHOW_BALL.lock() {
+        *sb = show_ball_pref;
+    }
+
     // System tray
+    let mut show_ball_item = CustomMenuItem::new("show_ball", "显示悬浮球");
+    if show_ball_pref {
+        show_ball_item = show_ball_item.selected();
+    }
     let tray_menu = SystemTrayMenu::new()
         .add_item(CustomMenuItem::new("show", "显示窗口"))
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(show_ball_item)
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(CustomMenuItem::new("quit", "退出"));
     let system_tray = SystemTray::new()
@@ -552,16 +592,44 @@ async fn main() {
         .system_tray(system_tray)
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::LeftClick { .. } => {
-                if let Some(window) = app.get_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                // 左键点击托盘图标不做任何事，通过菜单操作
             }
             SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                 "show" => {
                     if let Some(window) = app.get_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
+                        expand_window(window);
+                    }
+                }
+                "show_ball" => {
+                    let new_val = {
+                        let mut sb = SHOW_BALL.lock().unwrap();
+                        *sb = !*sb;
+                        *sb
+                    };
+                    // 更新菜单勾选状态
+                    let _ = app.tray_handle().get_item("show_ball").set_selected(new_val);
+                    // 持久化
+                    let mut prefs = read_prefs();
+                    prefs["showBall"] = serde_json::json!(new_val);
+                    write_prefs(&prefs);
+
+                    if let Some(window) = app.get_window("main") {
+                        if new_val {
+                            // 显示悬浮球：先收回到小球状态再显示
+                            let _ = app.tray_handle().set_title("");
+                            collapse_window(window);
+                        } else {
+                            // 隐藏悬浮球，立即显示数值
+                            let _ = window.hide();
+                            let tray = app.tray_handle();
+                            let collector = Collector::new();
+                            tokio::spawn(async move {
+                                if let Ok(m) = collector.collect().await {
+                                    let title = format!("C:{:>3.0}% M:{:>3.0}%", m.cpu, m.memory);
+                                    let _ = tray.set_title(&title);
+                                }
+                            });
+                        }
                     }
                 }
                 "quit" => {
@@ -581,6 +649,7 @@ async fn main() {
             // 启动时隐藏 Dock 图标（只有托盘图标）
             hide_dock_icon();
 
+
             // 将悬浮球定位到屏幕右侧
             if let Some(monitor) = window.current_monitor().ok().flatten() {
                 let screen_size = monitor.size();
@@ -589,27 +658,42 @@ async fn main() {
                 let x = screen_size.width as f64 - ball_size - 20.0 * scale;
                 let y = screen_size.height as f64 / 2.0 - ball_size / 2.0;
                 let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+                // 保存初始位置
+                if let Ok(mut bp) = BALL_POSITION.lock() {
+                    *bp = (x as i32, y as i32);
+                }
             }
-            let _ = window.show();
+            // 根据偏好决定是否显示悬浮球
+            let show_ball = SHOW_BALL.lock().map(|sb| *sb).unwrap_or(true);
+            if show_ball {
+                let _ = window.show();
+            }
+
+            // 定时更新托盘标题（悬浮球隐藏时显示数值）
+            let app_handle = app.handle();
+            let collector_tray = Arc::new(Collector::new());
+            tokio::spawn(async move {
+                let mut interval = interval(Duration::from_secs(3));
+                loop {
+                    interval.tick().await;
+                    let show = SHOW_BALL.lock().map(|sb| *sb).unwrap_or(true);
+                    if !show {
+                        if let Ok(m) = collector_tray.collect().await {
+                            let title = format!("C:{:>3.0}% M:{:>3.0}%", m.cpu, m.memory);
+                            let _ = app_handle.tray_handle().set_title(&title);
+                        }
+                    }
+                }
+            });
 
             Ok(())
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
-                // 点击关闭按钮时不退出，收回悬浮球
+                // 点击关闭按钮时不退出，复用 collapse_window 逻辑
                 api.prevent_close();
                 let window = event.window().clone();
-                hide_dock_icon();
-                hide_title_bar(&window);
-                let _ = window.set_skip_taskbar(true);
-                let _ = window.set_always_on_top(true);
-                let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 64.0, height: 64.0 })));
-                let _ = window.set_max_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 64.0, height: 64.0 })));
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 64.0, height: 64.0 }));
-                remove_window_shadow(&window);
-                make_window_draggable(&window);
-                // 通知前端切回悬浮球
-                let _ = window.eval("window.__collapseFromNative && window.__collapseFromNative()");
+                collapse_window(window);
             }
         })
         .invoke_handler(tauri::generate_handler![

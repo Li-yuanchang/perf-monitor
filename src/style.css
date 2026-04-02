@@ -114,6 +114,12 @@ body {
 
 .floating-ball:hover .water-border {
   filter: drop-shadow(0 0 6px currentColor);
+  animation: glowPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes glowPulse {
+  0%, 100% { filter: drop-shadow(0 0 4px currentColor); }
+  50% { filter: drop-shadow(0 0 10px currentColor); }
 }
 
 /* 水位容器 - 平滑升降 */
@@ -183,6 +189,16 @@ body {
   display: flex;
   flex-direction: column;
   animation: expandIn 0.3s ease;
+}
+
+.export-msg {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .app.with-frame {
