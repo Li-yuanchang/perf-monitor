@@ -97,8 +97,8 @@ function App() {
 
   // Report
   const [report, setReport] = useState<Report | null>(null);
-  const [beforeWindow, setBeforeWindow] = useState({ minutes: 10 });
-  const [afterWindow, setAfterWindow] = useState({ minutes: 10 });
+  const [selectedMarkA, setSelectedMarkA] = useState<number | null>(null);
+  const [selectedMarkB, setSelectedMarkB] = useState<number | null>(null);
 
   // Process rankings
   const [rankings, setRankings] = useState<ProcessRanking[]>([]);
@@ -276,7 +276,7 @@ function App() {
 
   // Fetch marks
   useEffect(() => {
-    if (isExpanded && activeTab === 'marks') {
+    if (isExpanded && (activeTab === 'marks' || activeTab === 'report')) {
       fetchMarks();
     }
   }, [isExpanded, activeTab]);
@@ -359,18 +359,29 @@ function App() {
   };
 
   const generateReport = () => {
-    // 以当前时间为分界点，前N分钟 vs 后N分钟（后窗口=最近N分钟）
-    const now = new Date();
-    const beforeEnd = new Date(now.getTime() - afterWindow.minutes * 60000);
-    const beforeStart = new Date(beforeEnd.getTime() - beforeWindow.minutes * 60000);
-    const afterStart = beforeEnd;
-    const afterEnd = now;
+    if (selectedMarkA === null || selectedMarkB === null) {
+      alert('请选择两个标记');
+      return;
+    }
+    const markA = marks.find((m) => m.id === selectedMarkA);
+    const markB = marks.find((m) => m.id === selectedMarkB);
+    if (!markA || !markB) return;
+
+    // 按时间排序：较早的为 before，较晚的为 after
+    const timeA = new Date(markA.timestamp).getTime();
+    const timeB = new Date(markB.timestamp).getTime();
+    const [earlier, later] = timeA < timeB ? [markA, markB] : [markB, markA];
+
+    const beforeStart = earlier.timestamp;
+    const beforeEnd = later.timestamp;
+    const afterStart = later.timestamp;
+    const afterEnd = new Date().toISOString();
 
     invoke<Report>('generate_report', {
-      beforeStart: beforeStart.toISOString(),
-      beforeEnd: beforeEnd.toISOString(),
-      afterStart: afterStart.toISOString(),
-      afterEnd: afterEnd.toISOString(),
+      beforeStart,
+      beforeEnd,
+      afterStart,
+      afterEnd,
     })
       .then((data) => setReport(data))
       .catch((err) => {
@@ -724,63 +735,96 @@ function App() {
         {/* Report Tab */}
         {activeTab === 'report' && (
           <div className="report-panel">
-            <p className="marks-desc">对比两段连续时间的性能数据。例如：较早 10 分钟 + 最近 10 分钟 = 对比 20 分钟前~10 分钟前 vs 最近 10 分钟的真实采集数据。数据越多越准确。</p>
+            <p className="marks-desc">选择两个标记，对比标记之间和标记之后的性能数据差异。先到「标记」页添加标记。</p>
             <div className="report-config">
               <div className="config-row">
-                <label>较早时段:</label>
-                <input
-                  type="number"
-                  value={beforeWindow.minutes}
-                  onChange={(e) => setBeforeWindow({ minutes: parseInt(e.target.value) || 0 })}
-                />
-                <span>分钟</span>
+                <label>标记 A:</label>
+                <select value={selectedMarkA ?? ''} onChange={(e) => setSelectedMarkA(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">请选择标记</option>
+                  {marks.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}（{new Date(m.timestamp).toLocaleString()}）</option>
+                  ))}
+                </select>
               </div>
               <div className="config-row">
-                <label>最近时段:</label>
-                <input
-                  type="number"
-                  value={afterWindow.minutes}
-                  onChange={(e) => setAfterWindow({ minutes: parseInt(e.target.value) || 0 })}
-                />
-                <span>分钟</span>
+                <label>标记 B:</label>
+                <select value={selectedMarkB ?? ''} onChange={(e) => setSelectedMarkB(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">请选择标记</option>
+                  {marks.filter((m) => m.id !== selectedMarkA).map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}（{new Date(m.timestamp).toLocaleString()}）</option>
+                  ))}
+                </select>
               </div>
-              <button className="action-btn" onClick={generateReport}>生成报告</button>
+              {selectedMarkA !== null && selectedMarkB !== null && (() => {
+                const mA = marks.find((m) => m.id === selectedMarkA);
+                const mB = marks.find((m) => m.id === selectedMarkB);
+                if (!mA || !mB) return null;
+                const tA = new Date(mA.timestamp).getTime();
+                const tB = new Date(mB.timestamp).getTime();
+                const [earlier, later] = tA < tB ? [mA, mB] : [mB, mA];
+                return (
+                  <div className="report-preview">
+                    <p>前期：{earlier.name} → {later.name}（{new Date(earlier.timestamp).toLocaleString()} ~ {new Date(later.timestamp).toLocaleString()}）</p>
+                    <p>后期：{later.name} → 当前（{new Date(later.timestamp).toLocaleString()} ~ 现在）</p>
+                  </div>
+                );
+              })()}
+              <button className="action-btn" onClick={generateReport} disabled={selectedMarkA === null || selectedMarkB === null}>生成报告</button>
             </div>
 
-            {report && (
+            {report && (() => {
+              const mA = marks.find((m) => m.id === selectedMarkA);
+              const mB = marks.find((m) => m.id === selectedMarkB);
+              const beforeLabel = mA && mB ? (() => {
+                const tA = new Date(mA.timestamp).getTime();
+                const tB = new Date(mB.timestamp).getTime();
+                return tA < tB ? `${mA.name} → ${mB.name}` : `${mB.name} → ${mA.name}`;
+              })() : '前期';
+              const afterLabel = mA && mB ? (() => {
+                const tA = new Date(mA.timestamp).getTime();
+                const tB = new Date(mB.timestamp).getTime();
+                return tA < tB ? `${mB.name} → 当前` : `${mA.name} → 当前`;
+              })() : '后期';
+              return (
               <div className="report-result">
                 <div className="report-summary">
                   <h3>分析结论</h3>
                   <p className={`conclusion ${report.comparison.cpu_better && report.comparison.mem_better ? 'positive' : report.comparison.cpu_better_percent < 0 || report.comparison.mem_better_percent < 0 ? 'negative' : 'neutral'}`}>
                     {report.comparison.conclusion}
                   </p>
+                  <p className="sample-info">前期采样 {report.before_window.sample_count} 条 / 后期采样 {report.after_window.sample_count} 条</p>
                 </div>
 
                 <div className="comparison-grid">
                   <div className="comparison-card">
-                    <h4>较早时段</h4>
+                    <h4>{beforeLabel}</h4>
                     <div className="stat-row"><span>平均 CPU</span><strong>{report.before_window.avg_cpu.toFixed(1)}%</strong></div>
                     <div className="stat-row"><span>峰值 CPU</span><strong>{report.before_window.peak_cpu.toFixed(1)}%</strong></div>
                     <div className="stat-row"><span>平均内存</span><strong>{report.before_window.avg_memory.toFixed(1)}%</strong></div>
+                    <div className="stat-row"><span>峰值内存</span><strong>{report.before_window.peak_memory.toFixed(1)}%</strong></div>
+                    <div className="stat-row"><span>平均 Swap</span><strong>{report.before_window.avg_swap.toFixed(0)} MB</strong></div>
                     <div className="stat-row"><span>卡顿评分</span><strong className={report.comparison.lag_score_before > 50 ? 'high' : 'low'}>{report.comparison.lag_score_before}</strong></div>
                   </div>
                   <div className="comparison-card">
-                    <h4>最近时段</h4>
+                    <h4>{afterLabel}</h4>
                     <div className="stat-row"><span>平均 CPU</span><strong>{report.after_window.avg_cpu.toFixed(1)}%</strong></div>
                     <div className="stat-row"><span>峰值 CPU</span><strong>{report.after_window.peak_cpu.toFixed(1)}%</strong></div>
                     <div className="stat-row"><span>平均内存</span><strong>{report.after_window.avg_memory.toFixed(1)}%</strong></div>
+                    <div className="stat-row"><span>峰值内存</span><strong>{report.after_window.peak_memory.toFixed(1)}%</strong></div>
+                    <div className="stat-row"><span>平均 Swap</span><strong>{report.after_window.avg_swap.toFixed(0)} MB</strong></div>
                     <div className="stat-row"><span>卡顿评分</span><strong className={report.comparison.lag_score_after > 50 ? 'high' : 'low'}>{report.comparison.lag_score_after}</strong></div>
                   </div>
                   <div className="comparison-card diff">
-                    <h4>对比改善</h4>
-                    <div className="stat-row"><span>CPU</span><strong className={report.comparison.cpu_better ? 'positive' : 'negative'}>{report.comparison.cpu_better_percent > 0 ? '+' : ''}{report.comparison.cpu_better_percent.toFixed(1)}%</strong></div>
-                    <div className="stat-row"><span>内存</span><strong className={report.comparison.mem_better ? 'positive' : 'negative'}>{report.comparison.mem_better_percent > 0 ? '+' : ''}{report.comparison.mem_better_percent.toFixed(1)}%</strong></div>
-                    <div className="stat-row"><span>Swap</span><strong className={report.comparison.swap_better ? 'positive' : 'negative'}>{report.comparison.swap_better_percent > 0 ? '+' : ''}{report.comparison.swap_better_percent.toFixed(1)}%</strong></div>
+                    <h4>对比变化</h4>
+                    <div className="stat-row"><span>CPU</span><strong className={report.comparison.cpu_better ? 'positive' : 'negative'}>{report.comparison.cpu_better_percent > 0 ? '↓' : '↑'}{Math.abs(report.comparison.cpu_better_percent).toFixed(1)}%</strong></div>
+                    <div className="stat-row"><span>内存</span><strong className={report.comparison.mem_better ? 'positive' : 'negative'}>{report.comparison.mem_better_percent > 0 ? '↓' : '↑'}{Math.abs(report.comparison.mem_better_percent).toFixed(1)}%</strong></div>
+                    <div className="stat-row"><span>Swap</span><strong className={report.comparison.swap_better ? 'positive' : 'negative'}>{report.comparison.swap_better_percent > 0 ? '↓' : '↑'}{Math.abs(report.comparison.swap_better_percent).toFixed(1)}%</strong></div>
                     <div className="stat-row"><span>卡顿改善</span><strong className={report.comparison.lag_score_before > report.comparison.lag_score_after ? 'positive' : 'negative'}>{report.comparison.lag_score_before - report.comparison.lag_score_after}</strong></div>
                   </div>
                 </div>
               </div>
-            )}
+            );
+            })()}
 
             <div className="ranking-section">
               <div className="ranking-header">
