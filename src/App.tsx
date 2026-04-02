@@ -76,6 +76,14 @@ function App() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [metric, setMetric] = useState<Metric | null>(null);
 
+  // 原生关闭按钮回调：收回悬浮球
+  useEffect(() => {
+    (window as any).__collapseFromNative = () => {
+      setIsExpanded(false);
+    };
+    return () => { delete (window as any).__collapseFromNative; };
+  }, []);
+
   // Tabs
   const [activeTab, setActiveTab] = useState<TabType>('realtime');
 
@@ -112,6 +120,7 @@ function App() {
   });
   const [autostart, setAutostart] = useState(false);
   const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>('auto');
+  const [showFrame, setShowFrame] = useState(true);
 
   // Fetch realtime data (with mock fallback)
   useEffect(() => {
@@ -311,6 +320,7 @@ function App() {
     const saved = localStorage.getItem('perf-theme') as 'auto' | 'light' | 'dark' | null;
     if (saved) setTheme(saved);
     invoke<boolean>('get_autostart').then(setAutostart).catch(() => {});
+    invoke<boolean>('get_show_frame').then(setShowFrame).catch(() => {});
   }, []);
 
   const fetchMarks = () => {
@@ -399,6 +409,8 @@ function App() {
       end: end.toISOString(),
     }).then((filepath) => {
       alert(`已导出到: ${filepath}`);
+    }).catch((err) => {
+      alert(`导出失败: ${err}`);
     });
   };
 
@@ -451,7 +463,7 @@ function App() {
 
   // Expanded mode
   return (
-    <div className="app">
+    <div className={`app ${showFrame ? 'with-frame' : 'no-frame'}`}>
       <header className="app-header" data-tauri-drag-region>
         <div className="header-left" data-tauri-drag-region>
           <button className="collapse-btn" onClick={doCollapse} title="收起">
@@ -916,6 +928,24 @@ function App() {
                         const val = e.target.checked;
                         invoke('set_autostart', { enabled: val })
                           .then(() => setAutostart(val))
+                          .catch((err: string) => alert(err));
+                      }}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+                <div className="setting-row">
+                  <div className="setting-label">
+                    <span>系统窗口框架</span>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={showFrame}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        invoke('set_show_frame', { enabled: val })
+                          .then(() => setShowFrame(val))
                           .catch((err: string) => alert(err));
                       }}
                     />

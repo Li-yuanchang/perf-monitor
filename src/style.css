@@ -179,11 +179,18 @@ body {
 .app {
   height: 100vh;
   background: var(--bg-primary);
-  border-radius: 12px;
   overflow: hidden;
-  animation: expandIn 0.3s ease;
   display: flex;
   flex-direction: column;
+  animation: expandIn 0.3s ease;
+}
+
+.app.with-frame {
+  border-radius: 0;
+}
+
+.app.no-frame {
+  border-radius: 12px;
 }
 
 @keyframes expandIn {
@@ -701,12 +708,23 @@ body {
 
 .config-row select {
   flex: 1;
-  padding: 8px 12px;
+  padding: 8px 28px 8px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--bg-primary);
-  color: var(--text-primary);
+  color: var(--text-secondary);
   font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%2386868b'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.config-row select:focus {
+  border-color: var(--accent-color);
 }
 
 .report-preview {

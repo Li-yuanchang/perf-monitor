@@ -14,7 +14,7 @@ mod macos;
 
 use collector::{Collector, Metric, ProcessInfo};
 use store::{Store, ProcessRanking};
-use macos::{remove_window_shadow, make_window_draggable, disable_window_draggable};
+use macos::{remove_window_shadow, make_window_draggable, disable_window_draggable, hide_dock_icon, show_dock_icon, show_title_bar, hide_title_bar};
 
 struct AppState {
     store: Arc<Mutex<Store>>,
@@ -214,13 +214,48 @@ fn kill_process(pid: i32) -> Result<String, String> {
     }
 }
 
+fn get_prefs_path() -> std::path::PathBuf {
+    let dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let app_dir = dir.join("PerfMonitor");
+    let _ = std::fs::create_dir_all(&app_dir);
+    app_dir.join("prefs.json")
+}
+
+fn read_prefs() -> serde_json::Value {
+    let path = get_prefs_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn write_prefs(prefs: &serde_json::Value) {
+    let path = get_prefs_path();
+    let _ = std::fs::write(&path, serde_json::to_string_pretty(prefs).unwrap_or_default());
+}
+
 #[tauri::command]
 fn get_settings() -> serde_json::Value {
+    let prefs = read_prefs();
     serde_json::json!({
         "collectionInterval": 3,
         "retentionDays": 30,
         "processInterval": 30,
+        "showFrame": prefs.get("showFrame").and_then(|v| v.as_bool()).unwrap_or(true),
     })
+}
+
+#[tauri::command]
+fn set_show_frame(enabled: bool) {
+    let mut prefs = read_prefs();
+    prefs["showFrame"] = serde_json::json!(enabled);
+    write_prefs(&prefs);
+}
+
+#[tauri::command]
+fn get_show_frame() -> bool {
+    let prefs = read_prefs();
+    prefs.get("showFrame").and_then(|v| v.as_bool()).unwrap_or(true)
 }
 
 #[tauri::command]
@@ -278,15 +313,23 @@ fn expand_window(window: Window) {
     // 关闭背景拖动，恢复正常点击事件
     disable_window_draggable(&window);
 
+    // 展开时显示 Dock 图标
+    show_dock_icon();
+
     // 先清除尺寸限制
     let _ = window.set_min_size(None::<tauri::Size>);
     let _ = window.set_max_size(None::<tauri::Size>);
 
-    // 启用装饰
-    let _ = window.set_decorations(true);
+    // 根据用户设置决定是否显示系统框架
+    let show_frame = get_show_frame();
+    if show_frame {
+        show_title_bar(&window);
+    } else {
+        // 无框架模式：保持透明无边框，但加阴影
+        hide_title_bar(&window);
+    }
     let _ = window.set_skip_taskbar(false);
     let _ = window.set_always_on_top(false);
-    let _ = window.set_resizable(true);
 
     // 设置窗口大小
     let win_w: f64 = 800.0;
@@ -326,11 +369,13 @@ fn expand_window(window: Window) {
 
 #[tauri::command]
 fn collapse_window(window: Window) {
-    // 禁用装饰
-    let _ = window.set_decorations(false);
+    // 收起时隐藏 Dock 图标
+    hide_dock_icon();
+
+    // 用原生 API 隐藏标题栏
+    hide_title_bar(&window);
     let _ = window.set_skip_taskbar(true);
     let _ = window.set_always_on_top(true);
-    let _ = window.set_resizable(false);
 
     // 使用 Logical 尺寸，确保在 Retina 屏幕上也是 64x64 CSS 像素
     let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize {
@@ -411,14 +456,18 @@ fn compare_windows(before: &TimeWindowStats, after: &TimeWindowStats) -> Compari
     let lag_score_before = calculate_lag_score(before);
     let lag_score_after = calculate_lag_score(after);
 
-    let conclusion = if cpu_better_percent > 5.0 && mem_better_percent > 5.0 {
-        "系统性能有明显改善，建议正式升级"
+    let conclusion = if cpu_better_percent > 10.0 && mem_better_percent > 10.0 {
+        "后期 CPU 和内存占用均大幅降低，系统负载明显减轻"
+    } else if cpu_better_percent > 5.0 && mem_better_percent > 5.0 {
+        "后期 CPU 和内存占用有所降低，系统运行更流畅"
     } else if cpu_better_percent > 0.0 || mem_better_percent > 0.0 {
-        "系统性能略有提升，升级效果正面"
+        "后期资源占用略有下降，整体差异不大"
+    } else if cpu_better_percent < -10.0 || mem_better_percent < -10.0 {
+        "后期资源占用明显上升，系统负载加重"
     } else if cpu_better_percent < -5.0 || mem_better_percent < -5.0 {
-        "系统性能下降，建议检查升级配置"
+        "后期资源占用有所上升，建议关注高占用进程"
     } else {
-        "系统性能基本持平，无明显变化"
+        "前后两段时间性能基本持平，无明显变化"
     };
 
     ComparisonStats {
@@ -528,7 +577,40 @@ async fn main() {
             let window = app.get_window("main").unwrap();
             remove_window_shadow(&window);
             make_window_draggable(&window);
+
+            // 启动时隐藏 Dock 图标（只有托盘图标）
+            hide_dock_icon();
+
+            // 将悬浮球定位到屏幕右侧
+            if let Some(monitor) = window.current_monitor().ok().flatten() {
+                let screen_size = monitor.size();
+                let scale = monitor.scale_factor();
+                let ball_size = 64.0 * scale;
+                let x = screen_size.width as f64 - ball_size - 20.0 * scale;
+                let y = screen_size.height as f64 / 2.0 - ball_size / 2.0;
+                let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+            }
+            let _ = window.show();
+
             Ok(())
+        })
+        .on_window_event(|event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
+                // 点击关闭按钮时不退出，收回悬浮球
+                api.prevent_close();
+                let window = event.window().clone();
+                hide_dock_icon();
+                hide_title_bar(&window);
+                let _ = window.set_skip_taskbar(true);
+                let _ = window.set_always_on_top(true);
+                let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 64.0, height: 64.0 })));
+                let _ = window.set_max_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 64.0, height: 64.0 })));
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 64.0, height: 64.0 }));
+                remove_window_shadow(&window);
+                make_window_draggable(&window);
+                // 通知前端切回悬浮球
+                let _ = window.eval("window.__collapseFromNative && window.__collapseFromNative()");
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_realtime,
@@ -547,6 +629,8 @@ async fn main() {
             kill_process,
             delete_mark,
             get_process_ranking,
+            set_show_frame,
+            get_show_frame,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
