@@ -18,6 +18,7 @@ use macos::{remove_window_shadow, make_window_draggable, disable_window_draggabl
 
 struct AppState {
     store: Arc<Mutex<Store>>,
+    collector: Arc<Collector>,
 }
 
 use std::sync::Mutex as StdMutex;
@@ -203,9 +204,8 @@ async fn delete_mark(state: tauri::State<'_, AppState>, id: i64) -> Result<(), S
 }
 
 #[tauri::command]
-async fn get_processes() -> Result<Vec<ProcessInfo>, String> {
-    let collector = Collector::new();
-    collector.collect_top_processes().await.map_err(|e| e.to_string())
+async fn get_processes(state: tauri::State<'_, AppState>) -> Result<Vec<ProcessInfo>, String> {
+    state.collector.collect_top_processes().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -639,7 +639,7 @@ async fn main() {
             },
             _ => {}
         })
-        .manage(AppState { store })
+        .manage(AppState { store, collector: collector.clone() })
         .setup(|app| {
             // 应用启动时设置窗口属性
             let window = app.get_window("main").unwrap();
